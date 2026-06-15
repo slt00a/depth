@@ -1,36 +1,34 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>VR panorama with depth — terminal interior</title>
+		<title>three.js vr - panorama with depth</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-		<style>
-			body { margin: 0; background: #101010; color: #fff; font-family: sans-serif; overflow: hidden; }
-			#info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1; font-size: 13px; }
-			#info a { color: #8cf; }
-		</style>
+		<link type="text/css" rel="stylesheet" href="main.css">
 	</head>
 	<body>
 		<div id="container"></div>
-		<div id="info">VR panorama with depth — drag to look, or click "Enter VR"</div>
 
-		<!-- three.js from CDN so this runs from one folder with no local build -->
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> vr - panorama with depth<br />
+			Created by <a href="https://orfleisher.com" target="_blank" rel="noopener">@juniorxsound</a>. Panorama from <a href="https://krpano.com/examples/?depthmap" target="_blank" rel="noopener">krpano</a>.
+		</div>
+
 		<script type="importmap">
-		{
-			"imports": {
-				"three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-				"three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
 			}
-		}
 		</script>
 
 		<script type="module">
 
 			import * as THREE from 'three';
 			import { VRButton } from 'three/addons/webxr/VRButton.js';
-			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-			let camera, scene, renderer, sphere, controls, clock;
+			let camera, scene, renderer, sphere, timer;
 
 			init();
 
@@ -38,7 +36,8 @@
 
 				const container = document.getElementById( 'container' );
 
-				clock = new THREE.Clock();
+				timer = new THREE.Timer();
+				timer.connect( document );
 
 				scene = new THREE.Scene();
 				scene.background = new THREE.Color( 0x101010 );
@@ -46,49 +45,50 @@
 				const light = new THREE.AmbientLight( 0xffffff, 3 );
 				scene.add( light );
 
-				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.1, 2000 );
-				// put the camera at the centre of the sphere
-				camera.position.set( 0, 0, 0.01 );
+				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 2000 );
 				scene.add( camera );
 
-				// Sphere we view from the inside. Higher segment count = smoother displacement.
-				const panoSphereGeo = new THREE.SphereGeometry( 6, 512, 512 );
+				// Create the panoramic sphere geometry
+				const panoSphereGeo = new THREE.SphereGeometry( 6, 256, 256 );
 
+				// Create the panoramic sphere material
 				const panoSphereMat = new THREE.MeshStandardMaterial( {
 					side: THREE.BackSide,
-					// POSITIVE scale: our depth map is inverted so NEAR = bright = pushed toward viewer.
-					// Tune this value to taste (try 0.5 – 2.0). Too high exaggerates noise in the holes.
-					displacementScale: 1.2,
-					displacementBias: 0.0
+					displacementScale: - 4.0
 				} );
 
+				// Create the panoramic sphere mesh
 				sphere = new THREE.Mesh( panoSphereGeo, panoSphereMat );
 
+				// Load and assign the texture and depth map
 				const manager = new THREE.LoadingManager();
 				const loader = new THREE.TextureLoader( manager );
 
-				// --- your colour panorama (left eye, 2:1 equirectangular) ---
-				loader.load( './pano_color.jpg', function ( texture ) {
+				loader.load( './textures/kandao3.jpg', function ( texture ) {
+
 					texture.colorSpace = THREE.SRGBColorSpace;
-					texture.minFilter = THREE.LinearFilter;
+					texture.minFilter = THREE.NearestFilter;
 					texture.generateMipmaps = false;
 					sphere.material.map = texture;
-					sphere.material.needsUpdate = true;
+
 				} );
 
-				// --- your depth map (inverted: near = bright) ---
-				loader.load( './pano_depth.jpg', function ( depth ) {
-					depth.minFilter = THREE.LinearFilter;
+				loader.load( './textures/kandao3_depthmap.jpg', function ( depth ) {
+
+					depth.minFilter = THREE.NearestFilter;
 					depth.generateMipmaps = false;
 					sphere.material.displacementMap = depth;
-					sphere.material.needsUpdate = true;
+
 				} );
 
+				// On load complete add the panoramic sphere to the scene
 				manager.onLoad = function () {
+
 					scene.add( sphere );
+
 				};
 
-				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer = new THREE.WebGLRenderer();
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
 				renderer.setAnimationLoop( animate );
@@ -98,27 +98,39 @@
 
 				document.body.appendChild( VRButton.createButton( renderer ) );
 
-				// Mouse/touch look-around for desktop preview (disabled automatically in VR)
-				controls = new OrbitControls( camera, renderer.domElement );
-				controls.enableZoom = false;
-				controls.enablePan = false;
-				controls.rotateSpeed = -0.3; // invert so dragging feels like looking around from inside
+				//
 
 				window.addEventListener( 'resize', onWindowResize );
 
 			}
 
 			function onWindowResize() {
+
 				camera.aspect = window.innerWidth / window.innerHeight;
 				camera.updateProjectionMatrix();
+
 				renderer.setSize( window.innerWidth, window.innerHeight );
+
 			}
 
 			function animate() {
-				if ( renderer.xr.isPresenting === false && controls ) {
-					controls.update();
+
+				timer.update();
+
+				// If we are not presenting move the camera a little so the effect is visible
+
+				if ( renderer.xr.isPresenting === false ) {
+
+					const time = timer.getElapsed();
+
+					sphere.rotation.y += 0.001;
+					sphere.position.x = Math.sin( time ) * 0.2;
+					sphere.position.z = Math.cos( time ) * 0.2;
+
 				}
+
 				renderer.render( scene, camera );
+
 			}
 
 		</script>
